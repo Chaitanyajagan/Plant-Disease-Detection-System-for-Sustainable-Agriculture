@@ -5,6 +5,7 @@ import time
 from PIL import Image
 import base64
 from io import BytesIO
+from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2, preprocess_input as mobile_preprocess, decode_predictions
 
 # Page configuration
 st.set_page_config(
@@ -492,10 +493,81 @@ def load_model():
         st.error(f"Error loading model: {str(e)}")
         return None
 
+@st.cache_resource
+def load_classifier_model():
+    try:
+        # Load MobileNetV2 pre-trained on ImageNet for general object recognition
+        model = MobileNetV2(weights='imagenet')
+        return model
+    except Exception as e:
+        st.error(f"Error loading classifier model: {str(e)}")
+        return None
+
+def is_plant_image(test_image):
+    classifier = load_classifier_model()
+    if classifier is None:
+        return True # Fail open if classifier fails
+    
+    try:
+        # Preprocess for MobileNetV2
+        img = Image.open(test_image).convert('RGB')
+        img = img.resize((224, 224))
+        img_array = tf.keras.preprocessing.image.img_to_array(img)
+        img_array = np.expand_dims(img_array, axis=0)
+        img_array = mobile_preprocess(img_array)
+        
+        preds = classifier.predict(img_array)
+        decoded_preds = decode_predictions(preds, top=5)[0]
+        
+        # Broad list of plant/agriculture related terms
+        plant_keywords = [
+            'leaf', 'plant', 'flower', 'fruit', 'vegetable', 'tree', 'grass', 
+            'agriculture', 'crop', 'corn', 'maize', 'wheat', 'rice', 'soy', 
+            'bean', 'berry', 'bush', 'shrub', 'forest', 'garden', 'pot',
+            'broccoli', 'cabbage', 'cauliflower', 'cucumber', 'zucchini',
+            'squash', 'pumpkin', 'melon', 'gourd', 'tomato', 'potato',
+            'pepper', 'apple', 'orange', 'lemon', 'lime', 'banana',
+            'grape', 'cherry', 'peach', 'pear', 'plum', 'strawberry',
+            'daisy', 'rose', 'tulip', 'sunflower', 'orchid', 'lily',
+            'fungus', 'mushroom', 'buckeye', 'ear', 'head_cabbage',
+            'cardoon', 'artichoke', 'bell_pepper', 'pineapple', 'fig',
+            'pomegranate', 'custard_apple', 'jackfruit', 'strawberry',
+            'greenhouse', 'pot', 'vase', 'cauliflower', 
+            # Textures often confused with leaves
+            'velvet', 'wool', 'silk', 'handkerchief', 'tissue', 'towel', 
+            'bath_towel', 'dishrag', 'doormat', 'swab', 'lint',
+            # Shapes/Green things confused with leaves
+            'chameleon', 'lizard', 'reptile', 'snake', 'slug', 'worm', 
+            'nematode', 'conch', 'snail', 'shell', 'sea_slug', 
+            'cucumber', 'zucchini', 'sea_anemone', 'coral', 'sponge',
+            'lacewing', 'dragonfly', 'damselfly', 'mantis', 'grasshopper',
+            'cricket', 'stick_insect', 'cockroach', 'ant', 'bee', 'fly'
+        ]
+        
+        # Check if any top prediction contains a plant keyword
+        is_plant = False
+        detected_objects = []
+        
+        for _, label, score in decoded_preds:
+            detected_objects.append(f"{label} ({score:.2f})")
+            label_lower = label.lower()
+            for keyword in plant_keywords:
+                if keyword in label_lower:
+                    is_plant = True
+                    break
+            if is_plant:
+                break
+                
+        return is_plant, detected_objects
+        
+    except Exception as e:
+        print(f"Error in classifier: {e}")
+        return True, [] # Fail open
+
 def model_prediction(test_image):
     model = load_model()
     if model is None:
-        return None
+        return None, 0
     
     try:
         image = tf.keras.preprocessing.image.load_img(test_image, target_size=(128, 128))
@@ -1037,72 +1109,53 @@ elif app_mode == "DISEASE RECOGNITION":
                 </div>
                 """, unsafe_allow_html=True)
             
-            # Perform prediction
-            result_index, confidence = model_prediction(test_image)
+            # Check if it's a plant image first
+            # Reset pointer
+            test_image.seek(0)
+            is_plant, detected = is_plant_image(test_image)
             
-            # Clear loading animation immediately after prediction
-            loading_placeholder.empty()
-            
-            if result_index is not None:
-                # Check confidence threshold
-                if confidence < 0.7:
-                     # Low confidence - likely not in dataset
-                    st.markdown("""
-                    <div class="card" style="margin: 2rem 0;">
-                        <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
-                        <p style="color: var(--text-secondary); line-height: 1.6;">Neural network analysis complete.</p>
+            if not is_plant:
+                # Clear loading animation
+                loading_placeholder.empty()
+                
+                st.markdown("""
+                <div class="card" style="margin: 2rem 0;">
+                    <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
+                    <p style="color: var(--text-secondary); line-height: 1.6;">Image Analysis Complete.</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                st.markdown(f"""
+                <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--neon-orange); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), 0 0 20px rgba(255, 107, 53, 0.3); animation: slideInUp 1s ease-out;">
+                    <h3 style="color: var(--neon-orange); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);">⚠️ NON-PLANT DETECTED</h3>
+                    <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Status:</strong> Invalid Image Type</p>
+                    <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">Our intelligent gatekeeper system has detected that this image is likely not a plant leaf.</p>
+                    <div style="background: rgba(255, 255, 255, 0.05); padding: 1rem; border-radius: 10px; margin-top: 1rem;">
+                        <p style="color: var(--text-secondary); margin: 0;"><strong>Detected Objects:</strong> {', '.join(detected[:3])}</p>
                     </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown("""
-                    <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--neon-orange); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), 0 0 20px rgba(255, 107, 53, 0.3); animation: slideInUp 1s ease-out;">
-                        <h3 style="color: var(--neon-orange); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);">⚠️ UNRECOGNIZED DISEASE</h3>
-                        <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Status:</strong> Disease Not Found in Database</p>
-                        <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">The uploaded image does not match any known disease in our database with high confidence.</p>
-                        <ul style="color: var(--text-secondary); font-size: 1rem; line-height: 2; margin: 1rem 0 0 2rem;">
-                            <li>The image may not be of a plant leaf</li>
-                            <li>The disease is not currently in our detection system</li>
-                            <li>The image quality may be insufficient for accurate detection</li>
-                            <li>The plant species is not supported</li>
-                        </ul>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.warning("⚠️ The predicted disease does not exist in our database. Please ensure you upload a clear image of a plant leaf from a supported species.")
-
-                # Validate that result_index is within valid range
-                elif result_index < 0 or result_index >= len(class_name):
-                    # Invalid index - disease doesn't exist
-                    st.markdown("""
-                    <div class="card" style="margin: 2rem 0;">
-                        <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
-                        <p style="color: var(--text-secondary); line-height: 1.6;">Neural network analysis complete.</p>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.markdown("""
-                    <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--neon-orange); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), 0 0 20px rgba(255, 107, 53, 0.3); animation: slideInUp 1s ease-out;">
-                        <h3 style="color: var(--neon-orange); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);">⚠️ UNRECOGNIZED DISEASE</h3>
-                        <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Status:</strong> Disease Not Found in Database</p>
-                        <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">The uploaded image does not match any known disease in our database. This could mean:</p>
-                        <ul style="color: var(--text-secondary); font-size: 1rem; line-height: 2; margin: 1rem 0 0 2rem;">
-                            <li>The image may not be of a plant leaf</li>
-                            <li>The disease is not currently in our detection system</li>
-                            <li>The image quality may be insufficient for accurate detection</li>
-                            <li>The plant species is not supported</li>
-                        </ul>
-                    </div>
-                    """, unsafe_allow_html=True)
-                    
-                    st.warning("⚠️ The predicted disease does not exist in our database. Please ensure you upload a clear image of a plant leaf from a supported species.")
-                    
-                else:
-                    # Get disease name
-                    disease_name = class_name[result_index]
-                    
-                    # Check if disease exists in our dictionaries
-                    if disease_name not in disease_descriptions:
-                        # Disease index is valid but not in our description database
+                    <ul style="color: var(--text-secondary); font-size: 1rem; line-height: 2; margin: 1rem 0 0 2rem;">
+                        <li>Please upload a clear image of a plant leaf</li>
+                        <li>Avoid images of people, animals, buildings, or other objects</li>
+                        <li>Ensure the plant is the main subject of the photo</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # We stop here
+            else:
+                # Reset pointer again for the next prediction model
+                test_image.seek(0)
+                
+                # Perform prediction
+                result_index, confidence = model_prediction(test_image)
+                
+                # Clear loading animation immediately after prediction
+                loading_placeholder.empty()
+                
+                if result_index is not None:
+                    # Check confidence threshold
+                    if confidence < 0.3:
+                        # Low confidence - likely not in dataset
                         st.markdown("""
                         <div class="card" style="margin: 2rem 0;">
                             <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
@@ -1110,126 +1163,183 @@ elif app_mode == "DISEASE RECOGNITION":
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        st.markdown(f"""
+                        st.markdown("""
                         <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--neon-orange); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), 0 0 20px rgba(255, 107, 53, 0.3); animation: slideInUp 1s ease-out;">
                             <h3 style="color: var(--neon-orange); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);">⚠️ UNRECOGNIZED DISEASE</h3>
-                            <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Predicted:</strong> {disease_name.replace('___', ' - ')}</p>
-                            <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">This disease is not currently in our database. Detailed information and treatment recommendations are not available.</p>
+                            <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Status:</strong> Disease Not Found in Database</p>
+                            <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">The uploaded image does not match any known disease in our database with high confidence.</p>
+                            <ul style="color: var(--text-secondary); font-size: 1rem; line-height: 2; margin: 1rem 0 0 2rem;">
+                                <li>The image may not be of a plant leaf</li>
+                                <li>The disease is not currently in our detection system</li>
+                                <li>The image quality may be insufficient for accurate detection</li>
+                                <li>The plant species is not supported</li>
+                            </ul>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        st.warning(f"⚠️ The disease '{disease_name.replace('___', ' - ')}' does not exist in our database. Please contact support or try with a different image.")
-                    else:
-                        # Valid disease - display results
-                        # Results section header
+                        st.warning("⚠️ The predicted disease does not exist in our database. Please ensure you upload a clear image of a plant leaf from a supported species.")
+
+                # Validate that result_index is within valid range
+                    # Validate that result_index is within valid range
+                    elif result_index < 0 or result_index >= len(class_name):
+                        # Invalid index - disease doesn't exist
                         st.markdown("""
                         <div class="card" style="margin: 2rem 0;">
                             <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
-                            <p style="color: var(--text-secondary); line-height: 1.6;">Neural network analysis complete. Review the diagnosis and detailed information below.</p>
+                            <p style="color: var(--text-secondary); line-height: 1.6;">Neural network analysis complete.</p>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Display KHASYAPIX results
-                        st.markdown(f"""
-                        <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--primary-color); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), var(--shadow-purple); animation: slideInUp 1s ease-out;">
-                            <h3 style="color: var(--primary-color); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);">🎯 KHASYAPIX DIAGNOSIS</h3>
-                            <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0;"><strong>Disease Identified:</strong> {disease_name.replace('___', ' - ')}</p>
+                        st.markdown("""
+                        <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--neon-orange); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), 0 0 20px rgba(255, 107, 53, 0.3); animation: slideInUp 1s ease-out;">
+                            <h3 style="color: var(--neon-orange); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);">⚠️ UNRECOGNIZED DISEASE</h3>
+                            <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Status:</strong> Disease Not Found in Database</p>
+                            <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">The uploaded image does not match any known disease in our database. This could mean:</p>
+                            <ul style="color: var(--text-secondary); font-size: 1rem; line-height: 2; margin: 1rem 0 0 2rem;">
+                                <li>The image may not be of a plant leaf</li>
+                                <li>The disease is not currently in our detection system</li>
+                                <li>The image quality may be insufficient for accurate detection</li>
+                                <li>The plant species is not supported</li>
+                            </ul>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # Disease description
-                        st.markdown(f"""
-                        <div class="card">
-                            <h3 style="color: var(--accent-color); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(0, 212, 255, 0.3);">📋 Disease Analysis Report</h3>
-                            <p style="color: var(--text-secondary); line-height: 1.8; font-size: 1.1rem;">{disease_descriptions[disease_name]}</p>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        st.warning("⚠️ The predicted disease does not exist in our database. Please ensure you upload a clear image of a plant leaf from a supported species.")
                         
-                        # Treatment and cure information
-                        if disease_name in disease_treatments:
+                    else:
+                        # Get disease name
+                        disease_name = class_name[result_index]
+                        
+                        # Check if disease exists in our dictionaries
+                        if disease_name not in disease_descriptions:
+                            # Disease index is valid but not in our description database
                             st.markdown("""
-                            <div style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 2px solid var(--neon-green); border-radius: var(--border-radius); padding: 2rem; margin: 2rem 0; box-shadow: var(--shadow), 0 0 20px rgba(57, 255, 20, 0.2);">
-                                <h3 style="color: var(--neon-green); margin-top: 0; margin-bottom: 1.5rem; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(57, 255, 20, 0.3); font-size: 1.5rem;">💊 Treatment & Cure Recommendations</h3>
+                            <div class="card" style="margin: 2rem 0;">
+                                <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
+                                <p style="color: var(--text-secondary); line-height: 1.6;">Neural network analysis complete.</p>
                             </div>
                             """, unsafe_allow_html=True)
                             
-                            # Display treatment information with proper markdown formatting
-                            treatment_text = disease_treatments[disease_name]
+                            st.markdown(f"""
+                            <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--neon-orange); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), 0 0 20px rgba(255, 107, 53, 0.3); animation: slideInUp 1s ease-out;">
+                                <h3 style="color: var(--neon-orange); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(255, 107, 53, 0.5);">⚠️ UNRECOGNIZED DISEASE</h3>
+                                <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0 0 1rem 0;"><strong>Predicted:</strong> {disease_name.replace('___', ' - ')}</p>
+                                <p style="color: var(--text-secondary); font-size: 1.1rem; line-height: 1.8; margin: 0;">This disease is not currently in our database. Detailed information and treatment recommendations are not available.</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                             
-                            # Parse and display treatments as styled steps
-                            steps = []
-                            lines = treatment_text.split('\n')
-                            current_step = ""
+                            st.warning(f"⚠️ The disease '{disease_name.replace('___', ' - ')}' does not exist in our database. Please contact support or try with a different image.")
+                        else:
+                            # Valid disease - display results
+                            # Results section header
+                            st.markdown("""
+                            <div class="card" style="margin: 2rem 0;">
+                                <h3 style="color: var(--neon-purple); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(139, 92, 246, 0.3);">📊 Step 3: KHASYAPIX Results</h3>
+                                <p style="color: var(--text-secondary); line-height: 1.6;">Neural network analysis complete. Review the diagnosis and detailed information below.</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                             
-                            for line in lines:
-                                line = line.strip()
-                                if not line:
-                                    continue
-                                    
-                                # Check if line starts with a number (e.g., "1. ", "2. ")
-                                if len(line) > 2 and line[0].isdigit() and line[1] == '.':
-                                    if current_step:
-                                        steps.append(current_step)
-                                    current_step = line
-                                elif len(line) > 3 and line[0].isdigit() and line[1].isdigit() and line[2] == '.': # Handle 10. etc
-                                     if current_step:
-                                        steps.append(current_step)
-                                     current_step = line
-                                else:
-                                    # Append to current step or keep as header/intro
-                                    if current_step:
-                                        current_step += " " + line
-                                    elif "**Treatment Methods:**" in line:
-                                        continue # Skip the header as we have our own
-                                    else:
-                                        # Likely prevention tips or unnumbered list
-                                        if line.startswith('- '):
-                                             steps.append(line)
-                                        else:
-                                             steps.append(line)
+                            # Display KHASYAPIX results
+                            st.markdown(f"""
+                            <div class="prediction-result" style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 3px solid var(--primary-color); border-radius: var(--border-radius); padding: 2.5rem; margin: 2rem 0; box-shadow: var(--shadow-hover), var(--shadow-purple); animation: slideInUp 1s ease-out;">
+                                <h3 style="color: var(--primary-color); margin-bottom: 1.5rem; font-size: 2rem; font-family: 'Orbitron', monospace; text-shadow: 0 0 20px rgba(0, 255, 136, 0.5);">🎯 KHASYAPIX DIAGNOSIS</h3>
+                                <p style="color: var(--accent-color); font-size: 1.3rem; font-weight: 600; margin: 0;"><strong>Disease Identified:</strong> {disease_name.replace('___', ' - ')}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
                             
-                            if current_step:
-                                steps.append(current_step)
+                            # Disease description
+                            st.markdown(f"""
+                            <div class="card">
+                                <h3 style="color: var(--accent-color); margin-top: 0; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(0, 212, 255, 0.3);">📋 Disease Analysis Report</h3>
+                                <p style="color: var(--text-secondary); line-height: 1.8; font-size: 1.1rem;">{disease_descriptions[disease_name]}</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            # Treatment and cure information
+                            if disease_name in disease_treatments:
+                                st.markdown("""
+                                <div style="background: linear-gradient(135deg, var(--bg-secondary), var(--bg-tertiary)); border: 2px solid var(--neon-green); border-radius: var(--border-radius); padding: 2rem; margin: 2rem 0; box-shadow: var(--shadow), 0 0 20px rgba(57, 255, 20, 0.2);">
+                                    <h3 style="color: var(--neon-green); margin-top: 0; margin-bottom: 1.5rem; font-family: 'Exo 2', sans-serif; font-weight: 700; text-shadow: 0 0 15px rgba(57, 255, 20, 0.3); font-size: 1.5rem;">💊 Treatment & Cure Recommendations</h3>
+                                </div>
+                                """, unsafe_allow_html=True)
                                 
-                            # Render steps
-                            for i, step in enumerate(steps):
-                                # Extract number if present
-                                step_content = step
-                                step_num = ""
+                                # Display treatment information with proper markdown formatting
+                                treatment_text = disease_treatments[disease_name]
                                 
-                                if step[0].isdigit():
-                                    parts = step.split('.', 1)
-                                    if len(parts) > 1:
-                                        step_num = parts[0]
-                                        step_content = parts[1].strip()
+                                # Parse and display treatments as styled steps
+                                steps = []
+                                lines = treatment_text.split('\n')
+                                current_step = ""
+                                
+                                for line in lines:
+                                    line = line.strip()
+                                    if not line:
+                                        continue
                                         
-                                        # Bold the title if it exists (e.g. **Fungicide Applications**:)
-                                        if "**" in step_content:
-                                            step_content = step_content.replace("**", "<span style='color: var(--accent-color); font-weight: 700;'>", 1).replace("**", "</span>", 1)
+                                    # Check if line starts with a number (e.g., "1. ", "2. ")
+                                    if len(line) > 2 and line[0].isdigit() and line[1] == '.':
+                                        if current_step:
+                                            steps.append(current_step)
+                                        current_step = line
+                                    elif len(line) > 3 and line[0].isdigit() and line[1].isdigit() and line[2] == '.': # Handle 10. etc
+                                         if current_step:
+                                            steps.append(current_step)
+                                         current_step = line
+                                    else:
+                                        # Append to current step or keep as header/intro
+                                        if current_step:
+                                            current_step += " " + line
+                                        elif "**Treatment Methods:**" in line:
+                                            continue # Skip the header as we have our own
+                                        else:
+                                            # Likely prevention tips or unnumbered list
+                                            if line.startswith('- '):
+                                                 steps.append(line)
+                                            else:
+                                                 steps.append(line)
                                 
-                                if step_num:
-                                    st.markdown(f"""
-                                    <div class="treatment-step">
-                                        <span class="step-number">STEP {step_num}</span>
-                                        <div class="step-content">{step_content}</div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                else:
-                                    # For bullet points or other text
-                                    clean_content = step.replace('- ', '', 1) if step.startswith('- ') else step
-                                    st.markdown(f"""
-                                    <div class="treatment-step" style="border-left-color: var(--accent-color);">
-                                        <div class="step-content">
-                                            <span style="color: var(--accent-color); margin-right: 10px;">➤</span>
-                                            {clean_content}
+                                if current_step:
+                                    steps.append(current_step)
+                                    
+                                # Render steps
+                                for i, step in enumerate(steps):
+                                    # Extract number if present
+                                    step_content = step
+                                    step_num = ""
+                                    
+                                    if step[0].isdigit():
+                                        parts = step.split('.', 1)
+                                        if len(parts) > 1:
+                                            step_num = parts[0]
+                                            step_content = parts[1].strip()
+                                            
+                                            # Bold the title if it exists (e.g. **Fungicide Applications**:)
+                                            if "**" in step_content:
+                                                step_content = step_content.replace("**", "<span style='color: var(--accent-color); font-weight: 700;'>", 1).replace("**", "</span>", 1)
+                                    
+                                    if step_num:
+                                        st.markdown(f"""
+                                        <div class="treatment-step">
+                                            <span class="step-number">STEP {step_num}</span>
+                                            <div class="step-content">{step_content}</div>
                                         </div>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                        
-                        # Success message
-                        st.success(f"🔬 KHASYAPIX Neural Network Prediction: {disease_name.replace('___', ' - ')}")
-            else:
-                st.error("❌ KHASYAPIX failed to process the image. Please try again with a different image.")
+                                        """, unsafe_allow_html=True)
+                                    else:
+                                        # For bullet points or other text
+                                        clean_content = step.replace('- ', '', 1) if step.startswith('- ') else step
+                                        st.markdown(f"""
+                                        <div class="treatment-step" style="border-left-color: var(--accent-color);">
+                                            <div class="step-content">
+                                                <span style="color: var(--accent-color); margin-right: 10px;">➤</span>
+                                                {clean_content}
+                                            </div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                            
+                            # Success message
+                            st.success(f"🔬 KHASYAPIX Neural Network Prediction: {disease_name.replace('___', ' - ')}")
+                else:
+                    st.error("❌ KHASYAPIX failed to process the image. Please try again with a different image.")
         else:
             st.warning("⚠️ Please upload an image first for KHASYAPIX analysis!")
     

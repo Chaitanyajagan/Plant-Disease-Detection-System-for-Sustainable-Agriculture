@@ -128,6 +128,10 @@ Plant-Disease-Detection-System/
 
 We welcome contributions! Please feel free to submit issues, feature requests, or pull requests.
 
+## 📄 License
+
+This project is open source and available under the MIT License.
+
 ## 🙏 Acknowledgments
 
 - Dataset: PlantVillage dataset for training images
