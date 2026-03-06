@@ -79,6 +79,66 @@ streamlit run main.py --server.address 0.0.0.0 --server.port 8501
 - **✨ Smooth Animations**: Beautiful transitions and hover effects
 - **🎯 Modern Layout**: Clean, professional interface with proper spacing
 
+## ⚙️ System Architecture
+
+### 🔄 High-Level Workflow
+The application follows a streamlined workflow using Streamlit for the user interface and TensorFlow/Keras for AI inference.
+
+```mermaid
+graph TD
+    User([🌾 Farmer / User]) -->|Uploads Leaf Image| UI[💻 Streamlit Web Interface]
+    
+    subgraph Frontend [🎨 User Interface Layer]
+        UI -->|Image Data| Preview[🖼️ Image Preview]
+        UI -->|Triggers| AnalyzeBtn[🧪 Predict Disease]
+    end
+
+    subgraph Backend [⚙️ Processing Layer]
+        AnalyzeBtn -->|Routes Request| Processor[🔄 Image Preprocessing]
+        Processor -->|Resizes & Normalizes| Format[📏 Format for Model]
+    end
+
+    subgraph ML_Model [🧠 Machine Learning Engine]
+        Format -->|Input Tensor (224x224x3)| ModelNode[🤖 MobileNetV2 Keras Model]
+        ModelNode -->|Extracts Features| Classifier[📊 Dense Classification Layer]
+        Classifier -->|Outputs Probabilities| LabelMatch[🏷️ Map to 38 Disease Classes]
+    end
+
+    LabelMatch -->|Diagnosis Result| Storage[📂 Result Generation]
+    Storage -->|JSON Data| Display[📈 Disease Identification & Info]
+    Display -->|Update UI| UI
+```
+
+### 🧱 Component Architecture
+A brief view of the core modules handling the image prediction lifecycle.
+
+```mermaid
+classDiagram
+    class StreamlitUI {
+        +sidebar_navigation()
+        +home_page()
+        +disease_recognition_page()
+    }
+    
+    class ImageProcessor {
+        +open_image(file)
+        +preprocess_input(img)
+        +format_tensor_for_model()
+    }
+    
+    class DiseaseClassifier {
+        -model: tf.keras.Model
+        -class_indices: dict
+        +load_model(path)
+        +predict_class(image)
+        +get_disease_details()
+    }
+    
+    StreamlitUI --> ImageProcessor : Request processing for Uploaded Image
+    StreamlitUI --> DiseaseClassifier : Sends Preprocessed Image
+    DiseaseClassifier --> StreamlitUI : Returns Diagnosis Result
+```
+
 ## 🔧 Technical Requirements
 
 - Python 3.7+
