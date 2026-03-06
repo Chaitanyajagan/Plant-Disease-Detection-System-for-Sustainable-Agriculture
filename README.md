@@ -95,17 +95,17 @@ graph TD
 
     subgraph Backend [⚙️ Processing Layer]
         AnalyzeBtn -->|Routes Request| Processor[🔄 Image Preprocessing]
-        Processor -->|Resizes & Normalizes| Format[📏 Format for Model]
+        Processor -->|Resizes and Normalizes| Format[📏 Format for Model]
     end
 
     subgraph ML_Model [🧠 Machine Learning Engine]
-        Format -->|Input Tensor (224x224x3)| ModelNode[🤖 MobileNetV2 Keras Model]
+        Format -->|Input Tensor 224x224x3| ModelNode[🤖 MobileNetV2 Keras Model]
         ModelNode -->|Extracts Features| Classifier[📊 Dense Classification Layer]
         Classifier -->|Outputs Probabilities| LabelMatch[🏷️ Map to 38 Disease Classes]
     end
 
     LabelMatch -->|Diagnosis Result| Storage[📂 Result Generation]
-    Storage -->|JSON Data| Display[📈 Disease Identification & Info]
+    Storage -->|JSON Data| Display[📈 Disease Identification and Info]
     Display -->|Update UI| UI
 ```
 
